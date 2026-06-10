@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "scheme": "com.mysterwolf.attenuate",
     "android": {
       "package": "com.mysterwolf.attenuate",
       "versionCode": 1,
@@ -14,7 +15,8 @@
       }
     },
     "plugins": [
-      "expo-keep-awake"
+      "expo-keep-awake",
+      "expo-auth-session"
     ]
   }
 }
