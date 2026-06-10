@@ -1,7 +1,20 @@
 {
   "expo": {
     "name": "Attenuate",
-    "slug": "Attenuate",
-    "version": "1.0.0"
+    "slug": "attenuate",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.mysterwolf.attenuate",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0E0D16"
+      }
+    },
+    "plugins": [
+      "expo-keep-awake"
+    ]
   }
 }
