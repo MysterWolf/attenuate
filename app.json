@@ -6,6 +6,12 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "com.mysterwolf.attenuate",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E0D16"
+    },
     "android": {
       "package": "com.mysterwolf.attenuate",
       "versionCode": 1,
@@ -14,9 +20,6 @@
         "backgroundColor": "#0E0D16"
       }
     },
-    "plugins": [
-      "expo-keep-awake",
-      "expo-auth-session"
-    ]
+    "plugins": []
   }
 }
