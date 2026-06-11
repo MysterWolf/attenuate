@@ -216,6 +216,13 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.0.8 — June 2026
+**SweepHome: two distinct sections with clear visual separation**
+
+- `src/screens/sweep/SweepHomeScreen.tsx` — restructured into three sections separated by hairline dividers: (1) CUT BY SENDER — pre-populated sender card (when arriving from Stats) + manual TextInput search field with `›` submit button; typing an email + submitting navigates directly to SweepPreview; (2) CUT BY CATEGORY — subtitle explaining Gmail sorts, then Promotions/Social/Updates/Forums buttons unchanged; (3) MORE TARGETS — Pro-gated Old Unread + By Keyword; screen title subtitle removed (sections are self-describing); `keyboardShouldPersistTaps="handled"` on ScrollView so tapping submit doesn't dismiss keyboard unexpectedly
+
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.0.7 — June 2026
 **Gmail category sweeps wired to SweepHome**
 

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -48,7 +49,8 @@ export function SweepHomeScreen() {
   const { senderEmail, senderName, senderCount } = route.params ?? {};
   const hasSender = !!senderEmail;
 
-  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [searchText,  setSearchText]  = useState('');
+  const [loadingId,   setLoadingId]   = useState<string | null>(null);
 
   const handleCategoryPress = async (cat: Category) => {
     if (loadingId) return;
@@ -70,52 +72,99 @@ export function SweepHomeScreen() {
     }
   };
 
+  const handleSearchSubmit = () => {
+    const trimmed = searchText.trim();
+    if (!trimmed) return;
+    nav.navigate('SweepPreview', {
+      senderEmail: trimmed,
+      senderName:  trimmed,
+      senderCount: 0,
+    });
+  };
+
   return (
     <SafeAreaView style={[s.root, { backgroundColor: C.background }]}>
-      <ScrollView contentContainerStyle={s.scroll}>
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
         <View style={s.header}>
           <Text style={[s.title, { color: C.ink }]}>Cut</Text>
-          <Text style={[s.subtitle, { color: C.muted }]}>Select a target to cut at scale</Text>
         </View>
 
-        {/* Pre-populated sender card — shown when arriving from Stats */}
-        {hasSender && (
-          <View style={s.selectedSection}>
-            <Text style={[s.sectionLabel, { color: C.muted }]}>SELECTED SENDER</Text>
-            <View style={[s.senderCard, { backgroundColor: C.surface, borderColor: C.accent }]}>
-              <View style={s.senderCardTop}>
-                <View style={s.senderCardInfo}>
-                  <Text style={[s.senderCardName, { color: C.ink }]} numberOfLines={1}>
-                    {senderName}
-                  </Text>
-                  <Text style={[s.senderCardEmail, { color: C.muted }]} numberOfLines={1}>
-                    {senderEmail}
-                  </Text>
-                </View>
-                <View style={[s.countBadge, { backgroundColor: C.accentDim }]}>
-                  <Text style={[s.countBadgeText, { color: C.accent }]}>{senderCount}</Text>
-                  <Text style={[s.countBadgeLabel, { color: C.accent }]}>msgs</Text>
+        {/* ── Section 1: Cut by Sender ── */}
+        <View style={s.section}>
+          <Text style={[s.sectionLabel, { color: C.muted }]}>CUT BY SENDER</Text>
+
+          {/* Pre-populated sender card — shown when arriving from Stats */}
+          {hasSender && (
+            <View style={s.senderBlock}>
+              <View style={[s.senderCard, { backgroundColor: C.surface, borderColor: C.accent }]}>
+                <View style={s.senderCardTop}>
+                  <View style={s.senderCardInfo}>
+                    <Text style={[s.senderCardName, { color: C.ink }]} numberOfLines={1}>
+                      {senderName}
+                    </Text>
+                    <Text style={[s.senderCardEmail, { color: C.muted }]} numberOfLines={1}>
+                      {senderEmail}
+                    </Text>
+                  </View>
+                  <View style={[s.countBadge, { backgroundColor: C.accentDim }]}>
+                    <Text style={[s.countBadgeText, { color: C.accent }]}>{senderCount}</Text>
+                    <Text style={[s.countBadgeLabel, { color: C.accent }]}>msgs</Text>
+                  </View>
                 </View>
               </View>
+              <TouchableOpacity
+                style={[s.previewBtn, { backgroundColor: C.accent }]}
+                onPress={() => nav.navigate('SweepPreview', {
+                  senderEmail: senderEmail!,
+                  senderName:  senderName!,
+                  senderCount: senderCount!,
+                })}
+              >
+                <Text style={[s.previewBtnText, { color: C.background }]}>Preview Cut</Text>
+              </TouchableOpacity>
             </View>
+          )}
+
+          {/* Manual sender search */}
+          <View style={s.searchRow}>
+            <TextInput
+              style={[s.searchInput, { backgroundColor: C.surface, borderColor: C.border, color: C.ink }]}
+              placeholder={hasSender ? 'Or search a different sender…' : 'sender@domain.com or @domain.com'}
+              placeholderTextColor={C.muted}
+              value={searchText}
+              onChangeText={setSearchText}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              returnKeyType="go"
+              onSubmitEditing={handleSearchSubmit}
+            />
             <TouchableOpacity
-              style={[s.previewBtn, { backgroundColor: C.accent }]}
-              onPress={() => nav.navigate('SweepPreview', {
-                senderEmail: senderEmail!,
-                senderName:  senderName!,
-                senderCount: senderCount!,
-              })}
+              style={[
+                s.searchBtn,
+                { backgroundColor: searchText.trim() ? C.accent : C.surface, borderColor: C.border },
+              ]}
+              onPress={handleSearchSubmit}
+              disabled={!searchText.trim()}
+              activeOpacity={0.7}
             >
-              <Text style={[s.previewBtnText, { color: C.background }]}>Preview Cut</Text>
+              <Text style={[s.searchBtnText, { color: searchText.trim() ? C.background : C.muted }]}>›</Text>
             </TouchableOpacity>
           </View>
-        )}
+        </View>
 
-        {/* Gmail native categories */}
+        {/* ── Divider ── */}
+        <View style={[s.divider, { backgroundColor: C.border }]} />
+
+        {/* ── Section 2: Cut by Category ── */}
         <View style={s.section}>
-          <Text style={[s.sectionLabel, { color: C.muted }]}>CATEGORIES</Text>
+          <Text style={[s.sectionLabel, { color: C.muted }]}>CUT BY CATEGORY</Text>
+          <Text style={[s.sectionSubtitle, { color: C.muted }]}>
+            Gmail sorts your inbox into these categories. Each cut removes all emails in that category regardless of sender.
+          </Text>
+
           {CATEGORIES.map(cat => {
-            const isLoading = loadingId === cat.id;
+            const isLoading  = loadingId === cat.id;
             const isDisabled = loadingId !== null && !isLoading;
             return (
               <TouchableOpacity
@@ -145,7 +194,10 @@ export function SweepHomeScreen() {
           })}
         </View>
 
-        {/* Pro-gated targets */}
+        {/* ── Divider ── */}
+        <View style={[s.divider, { backgroundColor: C.border }]} />
+
+        {/* ── Pro-gated targets ── */}
         <View style={s.section}>
           <Text style={[s.sectionLabel, { color: C.muted }]}>MORE TARGETS</Text>
           {PRO_TARGETS.map(target => (
@@ -179,7 +231,7 @@ const s = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 28,
     marginTop: 8,
   },
   title: {
@@ -187,23 +239,27 @@ const s = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.5,
   },
-  subtitle: {
-    fontSize: 14,
-    marginTop: 4,
-  },
-  selectedSection: {
-    marginBottom: 28,
-    gap: 10,
-  },
   section: {
-    marginBottom: 28,
-    gap: 8,
+    gap: 10,
+    marginBottom: 24,
   },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 1.2,
-    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -2,
+    marginBottom: 2,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginBottom: 24,
+  },
+  senderBlock: {
+    gap: 10,
   },
   senderCard: {
     borderRadius: 12,
@@ -250,6 +306,29 @@ const s = StyleSheet.create({
   previewBtnText: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: 14,
+  },
+  searchBtn: {
+    width: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBtnText: {
+    fontSize: 22,
+    lineHeight: 26,
   },
   targetCard: {
     borderRadius: 12,
