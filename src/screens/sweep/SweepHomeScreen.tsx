@@ -15,7 +15,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useTheme } from '../../providers/ThemeProvider';
 import { useAuth } from '../../providers/AuthProvider';
 import { getValidAccessToken } from '../../services/authService';
-import { GmailAuthError, getMessageIdsByQuery } from '../../services/gmailService';
+import { GmailAuthError, getPreviewData } from '../../services/gmailService';
 import type { SweepStackParamList } from '../../navigation/SweepNavigator';
 
 type Nav   = NativeStackNavigationProp<SweepStackParamList, 'SweepHome'>;
@@ -58,11 +58,11 @@ export function SweepHomeScreen() {
     try {
       const token = await getValidAccessToken();
       if (!token) { onAuthRevoked(); return; }
-      const ids = await getMessageIdsByQuery(token, cat.query);
+      const { estimatedCount } = await getPreviewData(token, `${cat.query} -in:trash`);
       nav.navigate('SweepPreview', {
         senderEmail: cat.query,
         senderName:  cat.label,
-        senderCount: ids.length,
+        senderCount: estimatedCount,
         gmailQuery:  cat.query,
       });
     } catch (err) {

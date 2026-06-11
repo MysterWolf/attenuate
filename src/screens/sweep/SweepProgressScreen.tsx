@@ -11,9 +11,7 @@ import { getValidAccessToken, saveSessionRecord, getShareImpact, recordCutToday,
 import { IMPACT_ENDPOINT } from '../../constants/config';
 import {
   GmailAuthError,
-  getSenderMessageIds,
-  getMessageIdsByQuery,
-  batchDeleteMessages,
+  streamDeleteByQuery,
 } from '../../services/gmailService';
 import { useAuth } from '../../providers/AuthProvider';
 
@@ -46,26 +44,34 @@ export function SweepProgressScreen() {
         const token = await getValidAccessToken();
         if (!token) { onAuthRevoked(); return; }
 
-        // Re-fetch IDs here so we delete exactly what was previewed
-        const ids = gmailQuery
-          ? await getMessageIdsByQuery(token, gmailQuery)
-          : await getSenderMessageIds(token, senderEmail);
-        setTotal(ids.length);
+        const q = gmailQuery
+          ? `${gmailQuery} -in:trash`
+          : `from:${senderEmail} -in:trash`;
 
-        if (ids.length === 0) {
+        // Stream: fetch 500 IDs → trash them → fetch next page → repeat.
+        // total stays as the estimate from Preview; deleted counter updates live.
+        const actualDeleted = await streamDeleteByQuery(
+          token,
+          q,
+          (del) => {
+            setDeleted(del);
+            // Bump the denominator if we exceed the initial estimate
+            setTotal(t => Math.max(t, del));
+          },
+          (pageNum, err) => {
+            console.warn(`[SweepProgress] page ${pageNum} skipped:`, err);
+          },
+        );
+
+        if (actualDeleted === 0) {
           setPhase('done');
           return;
         }
 
-        await batchDeleteMessages(token, ids, (done, tot) => {
-          setDeleted(done);
-          setTotal(tot);
-        });
-
         await saveSessionRecord({
           senderEmail: senderEmail,
           senderName:  senderName,
-          count:       ids.length,
+          count:       actualDeleted,   // actual count, not the estimate
           timestamp:   Date.now(),
         });
 
@@ -76,7 +82,7 @@ export function SweepProgressScreen() {
           fetch(IMPACT_ENDPOINT, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ count: ids.length, streak: currentStreak }),
+            body:    JSON.stringify({ count: actualDeleted, streak: currentStreak }),
           }).catch(() => {});
         }
 

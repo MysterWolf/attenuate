@@ -180,51 +180,98 @@ export async function getTopSenders(
 
 // ── Sweep helpers ─────────────────────────────────────
 
-// Fetch all message IDs from a given sender. Used for preview count + delete.
-// Excludes messages already in Trash so repeated sweeps don't double-count.
-async function fetchAllMessageIds(token: string, q: string): Promise<string[]> {
-  const ids: string[] = [];
+// Single list call: returns an estimated total count + a handful of sample IDs
+// for subject preview. Never fetches more than one page — safe for any inbox size.
+export async function getPreviewData(
+  token: string,
+  q:     string,
+): Promise<{ estimatedCount: number; sampleIds: string[] }> {
+  const result = await gFetch<{
+    messages?:           Array<{ id: string }>;
+    resultSizeEstimate?: number;
+  }>(token, '/messages', { maxResults: '5', q }, 0, 'getPreviewData');
+
+  const sampleIds     = (result.messages ?? []).map(m => m.id);
+  const estimatedCount = result.resultSizeEstimate ?? sampleIds.length;
+  console.log('[gmail] getPreviewData estimate:', estimatedCount, 'sampleIds:', sampleIds.length);
+  return { estimatedCount, sampleIds };
+}
+
+// Streaming delete: fetches 500 IDs per page and immediately trashes them,
+// then advances via nextPageToken. Never holds more than 500 IDs in memory.
+//
+// Per-page batchModify failures are logged and skipped (non-fatal) — the
+// nextPageToken still advances to the next block of IDs. 401s are always fatal.
+//
+// Returns the actual count of messages successfully trashed.
+export async function streamDeleteByQuery(
+  token:       string,
+  q:           string,
+  onProgress:  (deleted: number) => void,
+  onPageError: (pageNum: number, err: unknown) => void,
+): Promise<number> {
   let pageToken: string | undefined;
-  let page = 0;
+  let pageNum      = 0;
+  let totalDeleted = 0;
+
+  console.log('[gmail] streamDeleteByQuery start:', q);
 
   while (true) {
+    // ── 1. Fetch next page of IDs ──────────────────────
     const params: Record<string, string> = { maxResults: '500', q };
     if (pageToken) params.pageToken = pageToken;
 
-    const result = await gFetch<{
-      messages?: Array<{ id: string }>;
+    const listResult = await gFetch<{
+      messages?:      Array<{ id: string }>;
       nextPageToken?: string;
-    }>(token, '/messages', params, 0, `fetchAllMessageIds/page[${page}]`);
-    page++;
+    }>(token, '/messages', params, 0, `streamDelete/list[${pageNum}]`);
 
-    const batch = result.messages ?? [];
-    ids.push(...batch.map(m => m.id));
+    const ids = (listResult.messages ?? []).map(m => m.id);
+    if (ids.length === 0) break;
 
-    if (!result.nextPageToken || batch.length === 0) break;
-    pageToken = result.nextPageToken;
+    // ── 2. Trash this page ────────────────────────────
+    try {
+      const res = await fetch(`${GMAIL_BASE}/messages/batchModify`, {
+        method:  'POST',
+        headers: {
+          Authorization:  `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ids,
+          addLabelIds:    ['TRASH'],
+          removeLabelIds: ['INBOX', 'UNREAD'],
+        }),
+      });
+
+      if (res.status === 401) {
+        await clearTokens();
+        throw new GmailAuthError();
+      }
+
+      if (!res.ok) {
+        const body = await res.text();
+        const err  = new Error(`batchModify ${res.status}: ${body}`);
+        console.warn('[gmail] streamDelete page', pageNum, 'skip —', err.message);
+        onPageError(pageNum, err);
+        // Continue — nextPageToken still valid; these IDs are left in inbox
+      } else {
+        totalDeleted += ids.length;
+        onProgress(totalDeleted);
+      }
+    } catch (err) {
+      if (err instanceof GmailAuthError) throw err;
+      console.warn('[gmail] streamDelete page', pageNum, 'skip —', err);
+      onPageError(pageNum, err);
+    }
+
+    if (!listResult.nextPageToken) break;
+    pageToken = listResult.nextPageToken;
+    pageNum++;
   }
 
-  return ids;
-}
-
-export async function getSenderMessageIds(
-  token:       string,
-  senderEmail: string,
-): Promise<string[]> {
-  console.log('[gmail] getSenderMessageIds', senderEmail);
-  const ids = await fetchAllMessageIds(token, `from:${senderEmail} -in:trash`);
-  console.log('[gmail] getSenderMessageIds done, ids:', ids.length);
-  return ids;
-}
-
-export async function getMessageIdsByQuery(
-  token: string,
-  query: string,
-): Promise<string[]> {
-  console.log('[gmail] getMessageIdsByQuery', query);
-  const ids = await fetchAllMessageIds(token, `${query} -in:trash`);
-  console.log('[gmail] getMessageIdsByQuery done, ids:', ids.length);
-  return ids;
+  console.log('[gmail] streamDeleteByQuery done, totalDeleted:', totalDeleted);
+  return totalDeleted;
 }
 
 // Fetch up to `limit` subject lines from a list of message IDs.

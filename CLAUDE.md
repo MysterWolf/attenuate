@@ -216,6 +216,21 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.1.0 — June 2026
+**Streaming delete pipeline — fixes large-target (40K+) Cut sessions**
+
+Root cause: `fetchAllMessageIds` loaded the entire ID set into memory (up to 40K+ strings) before starting any deletes. For large targets this OOM'd or hit pagination limits.
+
+- `src/services/gmailService.ts` — replaced `fetchAllMessageIds` / `getSenderMessageIds` / `getMessageIdsByQuery` with two new exports:
+  - `getPreviewData(token, q)` — single `messages.list` call with `maxResults:5`; returns `{ estimatedCount, sampleIds }` using `resultSizeEstimate` from the API; never fetches more than one page regardless of inbox size; used by both SweepPreviewScreen and SweepHomeScreen
+  - `streamDeleteByQuery(token, q, onProgress, onPageError)` — streaming pipeline: fetches 500 IDs via `nextPageToken`, immediately trashes them via `batchModify`, then advances to next page; never holds more than 500 IDs in memory; per-page batchModify errors are logged + passed to `onPageError` and skipped (non-fatal); 401s always throw `GmailAuthError`; returns actual trashed count
+- `src/screens/sweep/SweepPreviewScreen.tsx` — replaced ID fetch with `getPreviewData`; shows `estimatedCount` as the preview count; sample subjects use `sampleIds` (first 5 from the list call); no full paginated fetch
+- `src/screens/sweep/SweepProgressScreen.tsx` — replaced ID fetch + `batchDeleteMessages` with `streamDeleteByQuery`; `total` starts as `senderCount` estimate from Preview params (denominator for progress bar); `deleted` updates live via `onProgress`; denominator bumps up if actual exceeds estimate; session record writes `actualDeleted` (not the estimate); telemetry also uses `actualDeleted`; `activateKeepAwake()` fires before the stream starts (confirmed in place from v1.0.9)
+- `src/screens/sweep/SweepHomeScreen.tsx` — replaced `getMessageIdsByQuery` with `getPreviewData` for category count before navigating to SweepPreview; same single-page approach
+
+**Memory profile per session:** was O(N) where N = total messages; now O(500) constant.
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.0.9 — June 2026
 **Wake lock during Cut session prevents screen-sleep interruption**
 

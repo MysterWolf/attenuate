@@ -16,8 +16,7 @@ import type { SweepStackParamList } from '../../navigation/SweepNavigator';
 import { getValidAccessToken } from '../../services/authService';
 import {
   GmailAuthError,
-  getSenderMessageIds,
-  getMessageIdsByQuery,
+  getPreviewData,
   getSampleSubjects,
 } from '../../services/gmailService';
 import { useAuth } from '../../providers/AuthProvider';
@@ -33,10 +32,10 @@ export function SweepPreviewScreen() {
 
   const { senderEmail, senderName, senderCount, gmailQuery } = route.params;
 
-  const [msgIds,   setMsgIds]   = useState<string[]>([]);
-  const [subjects, setSubjects] = useState<string[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState<string | null>(null);
+  const [realCount, setRealCount] = useState(senderCount);
+  const [subjects,  setSubjects]  = useState<string[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,13 +45,15 @@ export function SweepPreviewScreen() {
         const token = await getValidAccessToken();
         if (!token) { onAuthRevoked(); return; }
 
-        const ids = gmailQuery
-          ? await getMessageIdsByQuery(token, gmailQuery)
-          : await getSenderMessageIds(token, senderEmail);
-        if (cancelled) return;
-        setMsgIds(ids);
+        const q = gmailQuery
+          ? `${gmailQuery} -in:trash`
+          : `from:${senderEmail} -in:trash`;
 
-        const subs = await getSampleSubjects(token, ids, 5);
+        const { estimatedCount, sampleIds } = await getPreviewData(token, q);
+        if (cancelled) return;
+        setRealCount(estimatedCount);
+
+        const subs = await getSampleSubjects(token, sampleIds, 5);
         if (cancelled) return;
         setSubjects(subs);
       } catch (err) {
@@ -66,8 +67,6 @@ export function SweepPreviewScreen() {
 
     return () => { cancelled = true; };
   }, [senderEmail, gmailQuery]);
-
-  const realCount = msgIds.length;
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: C.background }]}>
