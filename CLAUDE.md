@@ -216,6 +216,13 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.0.6 — June 2026
+**Stats: domain grouping for top senders**
+
+- `src/screens/StatsScreen.tsx` — senders list now grouped by domain (`extractDomain` + `groupBySenderDomain`); each `DomainRow` shows domain, address count, total email count, and a volume bar; single-address domains tap to navigate directly to SweepHome with that sender; multi-address domains tap to expand accordion showing individual senders + "Cut all from @domain" action; domain-level cut passes `senderEmail: "@domain.com"` which routes through the existing `from:${senderEmail}` Gmail query as `from:@domain.com`, matching all addresses at that domain; no changes to gmailService, SweepPreviewScreen, or SweepProgressScreen
+
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.0.5 — June 2026
 **Stats gamification: elimination counter, inbox health waveform, milestones, cut streaks**
 

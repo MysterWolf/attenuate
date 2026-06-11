@@ -47,7 +47,35 @@ interface StatsData {
 
 type LoadState = 'idle' | 'loading' | 'refreshing';
 
+interface DomainGroup {
+  domain:     string;
+  totalCount: number;
+  senders:    SenderEntry[];
+}
+
 const INITIAL: StatsData = { profile: null, inbox: null, senders: [] };
+
+// ── Domain grouping ───────────────────────────────────
+
+function extractDomain(email: string): string {
+  const at = email.indexOf('@');
+  return at >= 0 ? email.slice(at + 1).toLowerCase() : email.toLowerCase();
+}
+
+function groupBySenderDomain(senders: SenderEntry[]): DomainGroup[] {
+  const map = new Map<string, DomainGroup>();
+  for (const s of senders) {
+    const domain = extractDomain(s.email);
+    const existing = map.get(domain);
+    if (existing) {
+      existing.totalCount += s.count;
+      existing.senders.push(s);
+    } else {
+      map.set(domain, { domain, totalCount: s.count, senders: [s] });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.totalCount - a.totalCount);
+}
 
 // ── Component ─────────────────────────────────────────
 
@@ -77,7 +105,6 @@ export function StatsScreen() {
     }
 
     try {
-      // Profile and inbox label fetch concurrently — fast
       const [profile, inbox] = await Promise.all([
         getProfile(token),
         getInboxLabel(token),
@@ -86,7 +113,6 @@ export function StatsScreen() {
       setStale(false);
       setLoadState('idle');
 
-      // Top senders is slower (200 message metadata fetches) — show separately
       setSendersLoading(true);
       const senders = await getTopSenders(token, SENDER_TOP_LIMIT, profile.email);
       setData(prev => ({ ...prev, senders }));
@@ -115,8 +141,7 @@ export function StatsScreen() {
 
   useEffect(() => { load(); loadLocalStats(); }, [load, loadLocalStats]);
 
-  // Refresh when navigating back from Sweep (after a delete)
-  // 3 s delay gives the Gmail API time to settle after a mailbox mutation
+  // 3s delay gives the Gmail API time to settle after a mailbox mutation
   useEffect(() => {
     if (isFocused && pendingRefresh.current) {
       pendingRefresh.current = false;
@@ -130,11 +155,11 @@ export function StatsScreen() {
     setPendingMilestone(null);
   }, [pendingMilestone]);
 
-  const navigateToSweep = (item: SenderEntry) => {
+  const navigateToSweep = (senderEmail: string, senderName: string, senderCount: number) => {
     pendingRefresh.current = true;
     nav.navigate('Sweep', {
       screen: 'SweepHome',
-      params: { senderEmail: item.email, senderName: item.name, senderCount: item.count },
+      params: { senderEmail, senderName, senderCount },
     });
   };
 
@@ -149,6 +174,9 @@ export function StatsScreen() {
 
   const isInitialLoad = loadState === 'loading';
   const isRefreshing  = loadState === 'refreshing';
+
+  const domainGroups = groupBySenderDomain(data.senders);
+  const maxDomainCount = domainGroups[0]?.totalCount ?? 1;
 
   const ListHeader = () => (
     <View style={[s.headerWrap, { paddingTop: insets.top + 16 }]}>
@@ -192,7 +220,6 @@ export function StatsScreen() {
         />
       </View>
 
-      {/* All-mail total as a smaller note */}
       {data.profile && (
         <Text style={[s.allMailNote, { color: C.muted }]}>
           {formatCount(data.profile.messagesTotal)} total messages across all mail
@@ -245,15 +272,25 @@ export function StatsScreen() {
     <>
     <FlatList
       style={[s.root, { backgroundColor: C.background }]}
-      data={data.senders}
-      keyExtractor={item => item.email}
+      data={domainGroups}
+      keyExtractor={item => item.domain}
       renderItem={({ item, index }) => (
-        <SenderRow
-          item={item}
+        <DomainRow
+          group={item}
           rank={index + 1}
-          max={data.senders[0]?.count ?? 1}
+          max={maxDomainCount}
           C={C}
-          onPress={() => navigateToSweep(item)}
+          formatCount={formatCount}
+          onDomainPress={() => navigateToSweep(
+            `@${item.domain}`,
+            item.domain,
+            item.totalCount,
+          )}
+          onSenderPress={(sender) => navigateToSweep(
+            sender.email,
+            sender.name,
+            sender.count,
+          )}
         />
       )}
       ListHeaderComponent={ListHeader}
@@ -270,6 +307,93 @@ export function StatsScreen() {
     />
     <MilestoneOverlay value={pendingMilestone} onDismiss={handleMilestoneDismiss} />
     </>
+  );
+}
+
+// ── DomainRow ─────────────────────────────────────────
+
+interface DomainRowProps {
+  group:        DomainGroup;
+  rank:         number;
+  max:          number;
+  C:            ReturnType<typeof useTheme>['C'];
+  formatCount:  (n: number) => string;
+  onDomainPress: () => void;
+  onSenderPress: (sender: SenderEntry) => void;
+}
+
+function DomainRow({ group, rank, max, C, formatCount, onDomainPress, onSenderPress }: DomainRowProps) {
+  const [expanded, setExpanded] = useState(false);
+  const barWidth = max > 0 ? (group.totalCount / max) * 100 : 0;
+  const multiSender = group.senders.length > 1;
+
+  const subtitle = multiSender
+    ? `${group.senders.length} addresses · ${formatCount(group.totalCount)} emails`
+    : `${group.senders[0]?.email ?? ''} · ${formatCount(group.totalCount)} emails`;
+
+  return (
+    <View>
+      {/* Domain header row */}
+      <TouchableOpacity
+        style={[s.senderRow, { borderBottomColor: C.border }]}
+        onPress={multiSender ? () => setExpanded(e => !e) : onDomainPress}
+        activeOpacity={0.6}
+      >
+        <Text style={[s.rank, { color: C.muted }]}>{rank}</Text>
+        <View style={s.senderInfo}>
+          <Text style={[s.senderName, { color: C.ink }]} numberOfLines={1}>{group.domain}</Text>
+          <Text style={[s.senderEmail, { color: C.muted }]} numberOfLines={1}>{subtitle}</Text>
+          <View style={[s.barTrack, { backgroundColor: C.border }]}>
+            <View style={[s.barFill, { width: `${barWidth}%`, backgroundColor: C.accent }]} />
+          </View>
+        </View>
+        {multiSender ? (
+          <TouchableOpacity onPress={() => setExpanded(e => !e)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={[s.senderChevron, { color: C.muted }]}>{expanded ? '∨' : '›'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={[s.senderChevron, { color: C.muted }]}>›</Text>
+        )}
+      </TouchableOpacity>
+
+      {/* Expanded individual senders */}
+      {expanded && multiSender && (
+        <View style={[s.expandedSection, { borderBottomColor: C.border, backgroundColor: C.surface }]}>
+          {/* Domain-level cut action */}
+          <TouchableOpacity
+            style={[s.domainCutRow, { borderBottomColor: C.border }]}
+            onPress={onDomainPress}
+            activeOpacity={0.6}
+          >
+            <Text style={[s.domainCutText, { color: C.accent }]}>
+              Cut all from @{group.domain}
+            </Text>
+            <Text style={[s.senderChevron, { color: C.accent }]}>›</Text>
+          </TouchableOpacity>
+
+          {/* Individual sender rows */}
+          {group.senders.map(sender => (
+            <TouchableOpacity
+              key={sender.email}
+              style={[s.subSenderRow, { borderBottomColor: C.border }]}
+              onPress={() => onSenderPress(sender)}
+              activeOpacity={0.6}
+            >
+              <View style={s.senderInfo}>
+                <Text style={[s.senderName, { color: C.inkMid, fontSize: 13 }]} numberOfLines={1}>
+                  {sender.name}
+                </Text>
+                <Text style={[s.senderEmail, { color: C.muted }]} numberOfLines={1}>
+                  {sender.email}
+                </Text>
+              </View>
+              <Text style={[s.senderCount, { color: C.inkMid, fontSize: 14 }]}>{sender.count}</Text>
+              <Text style={[s.senderChevron, { color: C.muted }]}>›</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -293,37 +417,6 @@ function CountCard({ label, value, formatFn, accent, C }: CountCardProps) {
         <Text style={[s.cardValue, { color: accent ?? C.ink }]}>{formatFn(value)}</Text>
       )}
     </View>
-  );
-}
-
-interface SenderRowProps {
-  item:    SenderEntry;
-  rank:    number;
-  max:     number;
-  C:       ReturnType<typeof useTheme>['C'];
-  onPress: () => void;
-}
-
-function SenderRow({ item, rank, max, C, onPress }: SenderRowProps) {
-  const barWidth = max > 0 ? (item.count / max) * 100 : 0;
-
-  return (
-    <TouchableOpacity
-      style={[s.senderRow, { borderBottomColor: C.border }]}
-      onPress={onPress}
-      activeOpacity={0.6}
-    >
-      <Text style={[s.rank, { color: C.muted }]}>{rank}</Text>
-      <View style={s.senderInfo}>
-        <Text style={[s.senderName, { color: C.ink }]} numberOfLines={1}>{item.name}</Text>
-        <Text style={[s.senderEmail, { color: C.muted }]} numberOfLines={1}>{item.email}</Text>
-        <View style={[s.barTrack, { backgroundColor: C.border }]}>
-          <View style={[s.barFill, { width: `${barWidth}%`, backgroundColor: C.accent }]} />
-        </View>
-      </View>
-      <Text style={[s.senderCount, { color: C.inkMid }]}>{item.count}</Text>
-      <Text style={[s.senderChevron, { color: C.muted }]}>›</Text>
-    </TouchableOpacity>
   );
 }
 
@@ -496,5 +589,28 @@ const s = StyleSheet.create({
   senderChevron: {
     fontSize: 20,
     marginLeft: 6,
+  },
+  expandedSection: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  domainCutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  domainCutText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  subSenderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
   },
 });
