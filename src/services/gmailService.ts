@@ -182,6 +182,11 @@ export async function getTopSenders(
 
 // Single list call: returns an estimated total count + a handful of sample IDs
 // for subject preview. Never fetches more than one page — safe for any inbox size.
+// Returns the resultSizeEstimate from a single messages.list call plus a handful
+// of sample IDs for subject preview. Uses maxResults:500 so Gmail has enough
+// context to compute a meaningful estimate — with maxResults:5 the estimate caps
+// near the page size (observed: always 201 for large from:@domain queries).
+// Only the first 5 IDs are ever used downstream; the rest are discarded.
 export async function getPreviewData(
   token: string,
   q:     string,
@@ -189,11 +194,13 @@ export async function getPreviewData(
   const result = await gFetch<{
     messages?:           Array<{ id: string }>;
     resultSizeEstimate?: number;
-  }>(token, '/messages', { maxResults: '5', q }, 0, 'getPreviewData');
+  }>(token, '/messages', { maxResults: '500', q }, 0, 'getPreviewData');
 
-  const sampleIds     = (result.messages ?? []).map(m => m.id);
-  const estimatedCount = result.resultSizeEstimate ?? sampleIds.length;
-  console.log('[gmail] getPreviewData estimate:', estimatedCount, 'sampleIds:', sampleIds.length);
+  // sampleIds: take up to 5 for subject preview — the rest are dropped immediately
+  const allIds         = (result.messages ?? []).map(m => m.id);
+  const sampleIds      = allIds.slice(0, 5);
+  const estimatedCount = result.resultSizeEstimate ?? allIds.length;
+  console.log('[gmail] getPreviewData estimate:', estimatedCount, 'total on page:', allIds.length);
   return { estimatedCount, sampleIds };
 }
 

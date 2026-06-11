@@ -216,6 +216,13 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.1.1 — June 2026
+**Fix: Preview always showed 201 for domain cuts**
+
+- `src/services/gmailService.ts` — `getPreviewData` now uses `maxResults: '500'` instead of `'5'`; Gmail's `resultSizeEstimate` is computed from the page size context and consistently returned ~201 when only 5 results were requested (the server caps its estimate near the page size for `from:@domain` queries); with a 500-result page the estimate reflects the true mailbox count; only the first 5 of the returned IDs are passed to `getSampleSubjects` — the rest are discarded immediately; no ID is stored across pages
+
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.1.0 — June 2026
 **Streaming delete pipeline — fixes large-target (40K+) Cut sessions**
 
