@@ -6,9 +6,9 @@ import { SweepProgressScreen } from '../screens/sweep/SweepProgressScreen';
 import { useTheme } from '../providers/ThemeProvider';
 
 export type SweepStackParamList = {
-  SweepHome:     undefined;
-  SweepPreview:  { targetId: string };
-  SweepProgress: { targetId: string };
+  SweepHome:     { senderEmail?: string; senderName?: string; senderCount?: number } | undefined;
+  SweepPreview:  { senderEmail: string; senderName: string; senderCount: number };
+  SweepProgress: { senderEmail: string; senderName: string; senderCount: number };
 };
 
 const Stack = createNativeStackNavigator<SweepStackParamList>();

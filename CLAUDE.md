@@ -125,6 +125,27 @@ Dark default. Accent: `#00C2A8` (signal teal).
 
 ThemeProvider persists via AsyncStorage key `attenuate_theme_mode`. Default: `'dark'`.
 
+## Icon Invariants (MWS Standard)
+
+Source: measured from Mission Control `ebike-icon.png` (canonical MWS reference).
+
+| Property | Value |
+|---|---|
+| Canvas | 1024×1024 px |
+| Content bounding box | max 783×783 px (76.5% of 1024) |
+| Uniform padding | **120 px on all four sides** |
+| Content center | (512, 512) — canvas center |
+| Background | #0E1A1A (Attenuate dark teal) |
+| No circular crop | Android launcher applies shape mask |
+
+For Attenuate's horizontal waveform (aspect ≈ 1.9:1): target 783px wide → ~412px tall, paste at (120, 306). Top/bottom padding ≈ 306px — correct per spec (more padding when content is not square).
+
+After any icon change: delete `android/app/build` and rebuild — Gradle caches mipmaps.
+
+Mipmap sizes: mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192 (`.webp` extension, PNG format).
+
+---
+
 ## Invariants — Never Change These
 - **Dark is the default mode.** Do not change default to 'light' or 'auto'.
 - **Accent is #00C2A8 (signal teal).** Do not substitute.
@@ -143,6 +164,7 @@ ThemeProvider persists via AsyncStorage key `attenuate_theme_mode`. Default: `'d
 | `attenuate_oauth_tokens` | `StoredTokens` JSON (accessToken, refreshToken, expiresAt) |
 | `attenuate_claude_api_key` | Claude API key string |
 | `attenuate_sweep_log` | JSON array of past sweep records |
+| `attenuate_share_impact` | `'true' \| 'false'` (community telemetry opt-in) |
 
 ## Pending Work (Priority Order)
 1. **Google OAuth credentials** — set `GOOGLE_CLIENT_ID_ANDROID` in config.ts; run `npx expo run:android` to generate native project
@@ -161,10 +183,23 @@ ThemeProvider persists via AsyncStorage key `attenuate_theme_mode`. Default: `'d
 # First time — generates android/ directory and applies intent-filter for OAuth
 npx expo run:android
 
-# Subsequent releases
+# Every subsequent build — bundle JS first, then assemble (no Metro needed)
+cd ~/Attenuate
+npx expo export:embed \
+  --platform android \
+  --dev false \
+  --entry-file index.js \
+  --bundle-output android/app/src/main/assets/index.android.bundle \
+  --assets-dest android/app/src/main/res
+cd android && ./gradlew assembleDebug
+adb -s 22081JEGR00391 install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Release
 cd android && ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
+
+**Important:** Debug APKs without an embedded bundle show "unable to load script" on launch. Always run `expo export:embed` before `assembleDebug`.
 
 ## Session Starter
 "I'm working on Attenuate — a React Native email management app at ~/Attenuate. Package: com.mysterwolf.attenuate. Expo SDK 56 bare workflow, Android-only. Read CLAUDE.md in full before making any changes. The Gmail API service is live — reference scripts in ~/Downloads/Attenuate/ show the query patterns used. Confirm you understand the architecture, invariants, and pending work before I give you the next task."
@@ -180,6 +215,52 @@ Relevant skills for this repo:
 ---
 
 ## Changelog
+
+### v1.0.5 — June 2026
+**Stats gamification: elimination counter, inbox health waveform, milestones, cut streaks**
+
+- `src/constants/config.ts` — added `STORAGE_STREAK = 'attenuate_streak'`, `STORAGE_MILESTONES = 'attenuate_milestones'`
+- `src/services/authService.ts` — added `getStreak()`, `recordCutToday()`, `MILESTONE_VALUES`, `getHitMilestones()`, `markMilestoneHit()`; streak persisted as `{ lastCutDate: YYYY-MM-DD, count }` — resets if no Cut in 24h after last cut day
+- `src/components/shared/InboxHealthWave.tsx` — new component; maps unread count to HealthLevel (pure_signal/mastered/mixed/unmastered/noisy/distorted); renders 36 animated bars (setInterval 20fps, phase ref) or flat line + null dot for Pure Signal; amplitude/freq/noise/speed params per level
+- `src/components/shared/MilestoneOverlay.tsx` — new component; full-screen Modal (dark 93% overlay), spring scale + opacity entrance, short milestone copy, tap to dismiss
+- `src/screens/StatsScreen.tsx` — added `loadLocalStats()` (reads session records, streak, checks milestones); title row now shows 🔥 streak badge; elimination counter below count cards; InboxHealthWave between all-mail note and TOP SENDERS; MilestoneOverlay rendered at root; `handleMilestoneDismiss` marks milestone as hit in AsyncStorage
+- `src/screens/sweep/SweepProgressScreen.tsx` — calls `recordCutToday()` after successful Cut; community impact POST now includes `streak` field alongside `count`
+
+**AsyncStorage keys added:** `attenuate_streak`, `attenuate_milestones`
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
+### v1.0.4 — June 2026
+**Cut branding + community impact telemetry**
+
+- `src/navigation/AppNavigator.tsx` — Sweep tab `tabBarLabel` changed to `'Cut'`
+- `src/screens/sweep/SweepHomeScreen.tsx` — screen title "Sweep" → "Cut"; subtitle updated; "Preview Delete" CTA → "Preview Cut"
+- `src/screens/sweep/SweepPreviewScreen.tsx` — count card label "MESSAGES TO DELETE" → "MESSAGES TO CUT"
+- `src/constants/config.ts` — added `STORAGE_SHARE_IMPACT = 'attenuate_share_impact'` and `IMPACT_ENDPOINT = 'https://api.attenuate.app/impact'`
+- `src/services/authService.ts` — added `getShareImpact()` and `setShareImpact(enabled)` helpers (AsyncStorage key `attenuate_share_impact`)
+- `src/screens/sweep/SweepProgressScreen.tsx` — on completion, checks `getShareImpact()`; if opted in, silently POSTs `{ count: N }` to `IMPACT_ENDPOINT` (failure swallowed)
+- `src/screens/SettingsScreen.tsx` — added COMMUNITY section: "Contribute to community impact" toggle (off by default) + personal total emails eliminated (summed from session records); wrapped layout in ScrollView; imports `getShareImpact`, `setShareImpact`, `getSessionRecords`
+
+### v1.0.3 — June 2026
+**Session history wired + Attenuate branding**
+
+- `src/services/authService.ts` — added `SessionRecord` type + `saveSessionRecord` (prepend-newest, 200-entry cap) + `getSessionRecords`; imports `STORAGE_SWEEP_LOG`
+- `src/screens/sweep/SweepProgressScreen.tsx` — writes `SessionRecord` to AsyncStorage on successful completion; "Deleting…" → "Attenuating…"; circle label "deleted" → "attenuated"; done status updated to match
+- `src/screens/sweep/SweepPreviewScreen.tsx` — confirm button "Delete" → "Attenuate"
+- `src/screens/HistoryScreen.tsx` — full rewrite: reads `SessionRecord[]` from AsyncStorage via `getSessionRecords`; displays card list with sender name/email, date/time, attenuated count; pull-to-refresh; title "History" → "Sessions", empty state updated
+- `src/navigation/AppNavigator.tsx` — History tab `tabBarLabel: 'Sessions'`; screen name unchanged so navigation refs stay stable
+
+### v1.0.2 — June 2026
+**Sender sweep flow wired + Metro DevTools disabled**
+
+- `metro.config.js` — stubs `DefaultToolLauncher` via `require.cache` before `@react-native/dev-middleware` loads it; prevents Chromium DevTools window from auto-launching (and disconnect popups) on every `npx expo start`
+- `src/navigation/SweepNavigator.tsx` — `SweepStackParamList` updated: `SweepHome` accepts optional `{ senderEmail, senderName, senderCount }`, `SweepPreview` + `SweepProgress` require those three fields
+- `src/screens/StatsScreen.tsx` — `SenderRow` is now a `TouchableOpacity`; tapping navigates to Sweep tab → `SweepHome` with sender pre-populated; chevron indicator added; `useIsFocused` + `pendingRefresh` ref triggers a data refresh when returning from Sweep after a delete
+- `src/screens/sweep/SweepHomeScreen.tsx` — shows pre-populated sender card (name, email, count badge) + "Preview Delete" CTA when `senderEmail` param is present; standard target list retained below
+- `src/screens/sweep/SweepPreviewScreen.tsx` — fetches real message count via `getSenderMessageIds` + 5 sample subjects via `getSampleSubjects`; shows count card + subject list; Delete button (accent danger) navigates to Progress; Cancel goes back
+- `src/screens/sweep/SweepProgressScreen.tsx` — re-fetches message IDs then calls `batchDeleteMessages` in 1,000-message batches; live counter + progress bar while running; done state shows total deleted + sender name; Done → `popToTop()`; error state with message
+- `src/services/gmailService.ts` — added `getSenderMessageIds` (`from:email` paginated query), `getSampleSubjects` (parallel metadata fetch for Subject header), `batchDeleteMessages` (POST `/messages/batchDelete` in 1k chunks with progress callback)
+
+**Invariants still holding:** dark default, #00C2A8 accent, `popToTop()` for sweep return, 401 → `onAuthRevoked()`, Claude API gated.
 
 ### v1.0.1 — June 2026
 **Gmail OAuth + Stats screen wired**

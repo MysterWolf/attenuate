@@ -31,19 +31,27 @@ export class GmailAuthError extends Error {
 
 // ── Core fetch helper ─────────────────────────────────
 
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
+
 async function gFetch<T>(
-  token: string,
-  path: string,
+  token:   string,
+  path:    string,
   params?: Record<string, string>,
+  attempt = 0,
+  tag     = '',
 ): Promise<T> {
   const url = new URL(`${GMAIL_BASE}${path}`);
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   }
 
+  if (tag) console.log(`[gmail] calling ${tag}`, path, params ?? '');
+
   const res = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${token}` },
   });
+
+  if (tag) console.log(`[gmail] ${tag} response:`, res.status);
 
   if (res.status === 401) {
     await clearTokens();
@@ -52,7 +60,15 @@ async function gFetch<T>(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Gmail API ${res.status}: ${body.slice(0, 120)}`);
+    console.error('[Attenuate/Gmail]', `${res.status} on ${path} (attempt ${attempt + 1})`, body);
+
+    // Retry transient backend errors (5xx) with exponential backoff
+    if (res.status >= 500 && attempt < RETRY_DELAYS_MS.length) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+      return gFetch(token, path, params, attempt + 1, tag);
+    }
+
+    throw new Error(`Gmail API ${res.status} (${path}): ${body}`);
   }
 
   return res.json() as Promise<T>;
@@ -62,9 +78,11 @@ async function gFetch<T>(
 
 // Account email + total message count across all mail
 export async function getProfile(token: string): Promise<GmailProfile> {
+  console.log('[gmail] calling getProfile');
   const data = await gFetch<{ emailAddress: string; messagesTotal: number; threadsTotal: number }>(
-    token, '/profile',
+    token, '/profile', undefined, 0, 'getProfile',
   );
+  console.log('[gmail] getProfile response: 200', data.emailAddress, data.messagesTotal);
   return {
     email:         data.emailAddress,
     messagesTotal: data.messagesTotal,
@@ -74,9 +92,11 @@ export async function getProfile(token: string): Promise<GmailProfile> {
 
 // Exact inbox message count and unread count via the INBOX system label
 export async function getInboxLabel(token: string): Promise<InboxLabel> {
+  console.log('[gmail] calling getInboxLabel');
   const data = await gFetch<{ messagesTotal: number; messagesUnread: number }>(
-    token, '/labels/INBOX',
+    token, '/labels/INBOX', undefined, 0, 'getInboxLabel',
   );
+  console.log('[gmail] getInboxLabel response: 200', data);
   return {
     messagesTotal:  data.messagesTotal,
     messagesUnread: data.messagesUnread,
@@ -91,9 +111,12 @@ export async function getTopSenders(
   limit:     number,
   userEmail: string,
 ): Promise<SenderEntry[]> {
+  console.log('[gmail] calling getTopSenders');
+
   // Step 1: collect up to SENDER_SAMPLE message IDs from inbox
   const msgIds: string[] = [];
   let pageToken: string | undefined;
+  let listPage = 0;
 
   while (msgIds.length < SENDER_SAMPLE) {
     const remaining   = SENDER_SAMPLE - msgIds.length;
@@ -105,7 +128,8 @@ export async function getTopSenders(
       messages?: Array<{ id: string }>;
       nextPageToken?: string;
       resultSizeEstimate?: number;
-    }>(token, '/messages', params);
+    }>(token, '/messages', params, 0, `getTopSenders/list[${listPage}]`);
+    listPage++;
 
     const batch = page.messages ?? [];
     msgIds.push(...batch.map(m => m.id));
@@ -113,6 +137,8 @@ export async function getTopSenders(
     if (!page.nextPageToken || batch.length === 0) break;
     pageToken = page.nextPageToken;
   }
+
+  console.log('[gmail] getTopSenders/list done, msgIds:', msgIds.length);
 
   if (msgIds.length === 0) return [];
 
@@ -143,6 +169,8 @@ export async function getTopSenders(
     }
   }
 
+  console.log('[gmail] getTopSenders/msg done, unique senders:', Object.keys(senderMap).length);
+
   // Step 3: sort by count descending, return top N
   return Object.entries(senderMap)
     .map(([email, { name, count }]) => ({ email, name, count }))
@@ -150,17 +178,133 @@ export async function getTopSenders(
     .slice(0, limit);
 }
 
+// ── Sweep helpers ─────────────────────────────────────
+
+// Fetch all message IDs from a given sender. Used for preview count + delete.
+// Excludes messages already in Trash so repeated sweeps don't double-count.
+export async function getSenderMessageIds(
+  token:       string,
+  senderEmail: string,
+): Promise<string[]> {
+  console.log('[gmail] calling getSenderMessageIds', senderEmail);
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+  let page = 0;
+
+  while (true) {
+    const params: Record<string, string> = {
+      maxResults: '500',
+      q: `from:${senderEmail} -in:trash`,
+    };
+    if (pageToken) params.pageToken = pageToken;
+
+    const result = await gFetch<{
+      messages?: Array<{ id: string }>;
+      nextPageToken?: string;
+    }>(token, '/messages', params, 0, `getSenderMessageIds/page[${page}]`);
+    page++;
+
+    const batch = result.messages ?? [];
+    ids.push(...batch.map(m => m.id));
+
+    if (!result.nextPageToken || batch.length === 0) break;
+    pageToken = result.nextPageToken;
+  }
+
+  console.log('[gmail] getSenderMessageIds done, ids:', ids.length);
+  return ids;
+}
+
+// Fetch up to `limit` subject lines from a list of message IDs.
+export async function getSampleSubjects(
+  token:  string,
+  msgIds: string[],
+  limit = 5,
+): Promise<string[]> {
+  console.log('[gmail] calling getSampleSubjects, sample size:', Math.min(msgIds.length, limit));
+  const sample = msgIds.slice(0, limit);
+  const results = await Promise.all(
+    sample.map((id, i) =>
+      gFetch<{
+        payload?: { headers?: Array<{ name: string; value: string }> };
+      }>(token, `/messages/${id}`, { format: 'metadata', metadataHeaders: 'Subject' }, 0, `getSampleSubjects[${i}]`),
+    ),
+  );
+  console.log('[gmail] getSampleSubjects done');
+  return results.map(msg => {
+    const subject = msg.payload?.headers?.find(h => h.name === 'Subject')?.value ?? '(no subject)';
+    return subject.length > 80 ? subject.slice(0, 77) + '…' : subject;
+  });
+}
+
+// Move messages to Trash in batches of 1,000 using batchModify.
+// batchDelete requires the mail.google.com scope; batchModify works with gmail.modify.
+// Messages are auto-purged from Trash after 30 days.
+// Calls onProgress(trashed, total) after each batch.
+export async function batchDeleteMessages(
+  token:      string,
+  msgIds:     string[],
+  onProgress: (deleted: number, total: number) => void,
+): Promise<number> {
+  const BATCH = 1000;
+  let deleted = 0;
+  const total = msgIds.length;
+
+  console.log('[gmail] calling batchDeleteMessages, total:', total);
+
+  for (let i = 0; i < msgIds.length; i += BATCH) {
+    const chunk = msgIds.slice(i, i + BATCH);
+    const url   = `${GMAIL_BASE}/messages/batchModify`;
+
+    console.log(`[gmail] batchModify batch ${i}–${i + chunk.length}`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization:  `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ids:              chunk,
+        addLabelIds:      ['TRASH'],
+        removeLabelIds:   ['INBOX', 'UNREAD'],
+      }),
+    });
+
+    console.log(`[gmail] batchModify response:`, res.status);
+
+    if (res.status === 401) {
+      await clearTokens();
+      throw new GmailAuthError();
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      console.error('[Attenuate/Gmail]', `batchModify ${res.status} batch starting at ${i}`, body);
+      throw new Error(`Gmail batchModify ${res.status}: ${body}`);
+    }
+
+    deleted += chunk.length;
+    onProgress(deleted, total);
+  }
+
+  console.log('[gmail] batchDeleteMessages done, deleted:', deleted);
+  return deleted;
+}
+
 // ── Helpers ───────────────────────────────────────────
 
-// Parse RFC 2822 From header into { name, email }
-// Handles: "Display Name <addr@example.com>", "addr@example.com", "Name<addr>"
+// Parse RFC 2822 From header into { name, email }.
+// Returns empty strings if no valid email address can be extracted —
+// callers filter on !email to discard unparseable headers.
 function parseFrom(header: string): { name: string; email: string } {
   const angleMatch = header.match(/^(.*?)\s*<([^>]+)>/);
   if (angleMatch) {
     const name  = angleMatch[1].trim().replace(/^"|"$/g, '');
     const email = angleMatch[2].trim().toLowerCase();
+    if (!email.includes('@')) return { name: '', email: '' };
     return { name: name || email, email };
   }
   const email = header.trim().toLowerCase();
+  if (!email.includes('@')) return { name: '', email: '' };
   return { name: email, email };
 }

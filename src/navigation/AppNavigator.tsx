@@ -2,15 +2,17 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { useTheme } from '../providers/ThemeProvider';
 import { StatsScreen } from '../screens/StatsScreen';
 import { SweepNavigator } from './SweepNavigator';
+import type { SweepStackParamList } from './SweepNavigator';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 
 export type TabParamList = {
   Stats:    undefined;
-  Sweep:    undefined;
+  Sweep:    NavigatorScreenParams<SweepStackParamList> | undefined;
   History:  undefined;
   Settings: undefined;
 };
@@ -52,8 +54,8 @@ export function AppNavigator() {
       })}
     >
       <Tab.Screen name="Stats"    component={StatsScreen} />
-      <Tab.Screen name="Sweep"    component={SweepNavigator} />
-      <Tab.Screen name="History"  component={HistoryScreen} />
+      <Tab.Screen name="Sweep"    component={SweepNavigator}  options={{ tabBarLabel: 'Cut' }} />
+      <Tab.Screen name="History"  component={HistoryScreen} options={{ tabBarLabel: 'Sessions' }} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );

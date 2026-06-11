@@ -1,45 +1,129 @@
-import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  ScrollView,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useTheme } from '../../providers/ThemeProvider';
 import type { SweepStackParamList } from '../../navigation/SweepNavigator';
+import { getValidAccessToken } from '../../services/authService';
+import {
+  GmailAuthError,
+  getSenderMessageIds,
+  getSampleSubjects,
+} from '../../services/gmailService';
+import { useAuth } from '../../providers/AuthProvider';
 
 type Nav   = NativeStackNavigationProp<SweepStackParamList, 'SweepPreview'>;
 type Route = RouteProp<SweepStackParamList, 'SweepPreview'>;
 
 export function SweepPreviewScreen() {
-  const { C } = useTheme();
-  const nav   = useNavigation<Nav>();
-  const route = useRoute<Route>();
-  const { targetId } = route.params;
+  const { C }          = useTheme();
+  const nav            = useNavigation<Nav>();
+  const route          = useRoute<Route>();
+  const { onAuthRevoked } = useAuth();
+
+  const { senderEmail, senderName, senderCount } = route.params;
+
+  const [msgIds,   setMsgIds]   = useState<string[]>([]);
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = await getValidAccessToken();
+        if (!token) { onAuthRevoked(); return; }
+
+        const ids = await getSenderMessageIds(token, senderEmail);
+        if (cancelled) return;
+        setMsgIds(ids);
+
+        const subs = await getSampleSubjects(token, ids, 5);
+        if (cancelled) return;
+        setSubjects(subs);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof GmailAuthError) { onAuthRevoked(); return; }
+        setError((err as Error).message ?? 'Failed to load preview.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [senderEmail]);
+
+  const realCount = msgIds.length;
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: C.background }]}>
-      <View style={s.header}>
-        <Text style={[s.title, { color: C.ink }]}>Preview</Text>
-        <Text style={[s.subtitle, { color: C.muted }]}>Target: {targetId}</Text>
-      </View>
+      <ScrollView contentContainerStyle={s.scroll}>
+        <View style={s.header}>
+          <Text style={[s.title, { color: C.ink }]}>Preview</Text>
+          <Text style={[s.senderLabel, { color: C.muted }]} numberOfLines={1}>
+            {senderName}
+          </Text>
+        </View>
 
-      <View style={[s.card, { backgroundColor: C.surface, borderColor: C.border }]}>
-        <Text style={[s.label, { color: C.muted }]}>MESSAGES TO DELETE</Text>
-        <Text style={[s.count, { color: C.ink }]}>—</Text>
-        <Text style={[s.note, { color: C.muted }]}>Connect Gmail to see a preview</Text>
-      </View>
+        {/* Count card */}
+        <View style={[s.countCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+          <Text style={[s.countLabel, { color: C.muted }]}>MESSAGES TO CUT</Text>
+          {loading ? (
+            <ActivityIndicator size="large" color={C.accent} style={s.spinner} />
+          ) : (
+            <Text style={[s.countValue, { color: C.ink }]}>{realCount}</Text>
+          )}
+          {!loading && (
+            <Text style={[s.countNote, { color: C.muted }]}>
+              All mail from {senderEmail}
+            </Text>
+          )}
+        </View>
 
-      <View style={s.actions}>
+        {/* Sample subjects */}
+        {subjects.length > 0 && (
+          <View style={s.subjectsSection}>
+            <Text style={[s.subjectsLabel, { color: C.muted }]}>SAMPLE SUBJECTS</Text>
+            {subjects.map((sub, i) => (
+              <View key={i} style={[s.subjectRow, { borderBottomColor: C.border }]}>
+                <Text style={[s.subjectText, { color: C.inkMid }]} numberOfLines={2}>
+                  {sub}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {error && (
+          <Text style={[s.errorText, { color: C.danger }]}>{error}</Text>
+        )}
+      </ScrollView>
+
+      {/* Actions */}
+      <View style={[s.actions, { borderTopColor: C.border }]}>
         <TouchableOpacity
           style={[s.btnSecondary, { borderColor: C.border }]}
           onPress={() => nav.goBack()}
         >
-          <Text style={[s.btnSecondaryText, { color: C.inkMid }]}>Back</Text>
+          <Text style={[s.btnSecondaryText, { color: C.inkMid }]}>Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[s.btnPrimary, { backgroundColor: C.accent }]}
-          onPress={() => nav.navigate('SweepProgress', { targetId })}
+          style={[s.btnPrimary, { backgroundColor: C.danger }, (loading || realCount === 0) && s.btnDisabled]}
+          disabled={loading || realCount === 0}
+          onPress={() => nav.navigate('SweepProgress', { senderEmail, senderName, senderCount: realCount })}
         >
-          <Text style={[s.btnPrimaryText, { color: C.background }]}>Confirm Sweep</Text>
+          <Text style={[s.btnPrimaryText, { color: '#fff' }]}>Attenuate</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -49,10 +133,13 @@ export function SweepPreviewScreen() {
 const s = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  scroll: {
     padding: 16,
+    paddingBottom: 24,
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 20,
     marginTop: 8,
   },
   title: {
@@ -60,11 +147,11 @@ const s = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.5,
   },
-  subtitle: {
+  senderLabel: {
     fontSize: 14,
     marginTop: 4,
   },
-  card: {
+  countCard: {
     borderRadius: 12,
     borderWidth: 1,
     padding: 20,
@@ -72,23 +159,50 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  label: {
+  countLabel: {
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 1.2,
   },
-  count: {
-    fontSize: 48,
+  spinner: {
+    marginVertical: 12,
+  },
+  countValue: {
+    fontSize: 56,
     fontWeight: '700',
     letterSpacing: -2,
   },
-  note: {
+  countNote: {
     fontSize: 13,
     textAlign: 'center',
+  },
+  subjectsSection: {
+    marginBottom: 24,
+  },
+  subjectsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  subjectRow: {
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  subjectText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  errorText: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
   },
   actions: {
     flexDirection: 'row',
     gap: 12,
+    padding: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   btnPrimary: {
     flex: 1,
@@ -98,7 +212,7 @@ const s = StyleSheet.create({
   },
   btnPrimaryText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   btnSecondary: {
     flex: 1,
@@ -110,5 +224,8 @@ const s = StyleSheet.create({
   btnSecondaryText: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  btnDisabled: {
+    opacity: 0.4,
   },
 });

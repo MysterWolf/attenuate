@@ -7,18 +7,23 @@ import {
   ActivityIndicator,
   SafeAreaView,
   StatusBar,
+  Linking,
 } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../providers/ThemeProvider';
-import { storeTokenResponse } from '../services/authService';
+import { storeTokenResponse, storeUserEmail } from '../services/authService';
+import { getProfile } from '../services/gmailService';
 import {
-  GOOGLE_CLIENT_ID_ANDROID,
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
   GMAIL_SCOPES,
   OAUTH_REDIRECT_SCHEME,
 } from '../constants/config';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const TAG = '[Attenuate/Auth]';
 
 const GOOGLE_DISCOVERY: AuthSession.DiscoveryDocument = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -36,10 +41,11 @@ export function ConnectScreen({ onSuccess }: Props) {
   const [exchanging, setExchanging] = useState(false);
 
   const redirectUri = AuthSession.makeRedirectUri({ scheme: OAUTH_REDIRECT_SCHEME });
+  console.log(TAG, 'redirectUri:', redirectUri);
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
-      clientId:     GOOGLE_CLIENT_ID_ANDROID,
+      clientId:     GOOGLE_CLIENT_ID,
       redirectUri,
       scopes:       GMAIL_SCOPES,
       usePKCE:      true,
@@ -52,37 +58,100 @@ export function ConnectScreen({ onSuccess }: Props) {
     GOOGLE_DISCOVERY,
   );
 
-  useEffect(() => {
-    if (response?.type !== 'success') {
-      if (response?.type === 'error') {
-        setError(response.error?.message ?? 'Authorization failed.');
-      }
-      return;
-    }
-
+  const exchangeCode = (code: string, codeVerifier: string | undefined) => {
     setExchanging(true);
     setError(null);
-
+    const extraParams: Record<string, string> = {};
+    if (codeVerifier) extraParams.code_verifier = codeVerifier;
+    if (GOOGLE_CLIENT_SECRET !== 'REPLACE_WITH_WEB_CLIENT_SECRET') {
+      extraParams.client_secret = GOOGLE_CLIENT_SECRET;
+    }
+    console.log(TAG, 'exchange params — clientId:', GOOGLE_CLIENT_ID, 'redirectUri:', redirectUri, 'hasPKCE:', !!codeVerifier);
     AuthSession.exchangeCodeAsync(
-      {
-        clientId:    GOOGLE_CLIENT_ID_ANDROID,
-        code:        response.params.code,
-        redirectUri,
-        extraParams: request?.codeVerifier
-          ? { code_verifier: request.codeVerifier }
-          : {},
-      },
+      { clientId: GOOGLE_CLIENT_ID, code, redirectUri, extraParams },
       GOOGLE_DISCOVERY,
     )
-      .then(tokenResponse => storeTokenResponse(tokenResponse))
-      .then(() => onSuccess())
+      .then(tokenResponse => {
+        console.log(TAG, 'token exchange success — storing tokens');
+        return storeTokenResponse(tokenResponse).then(() => tokenResponse.accessToken);
+      })
+      .then(async accessToken => {
+        console.log(TAG, 'tokens stored — fetching profile email');
+        try {
+          const profile = await getProfile(accessToken);
+          await storeUserEmail(profile.email);
+          console.log(TAG, 'user email stored:', profile.email);
+        } catch (_) {
+          // Non-fatal — Settings will just show "Connected" without email
+        }
+        console.log(TAG, 'calling onSuccess');
+        onSuccess();
+      })
       .catch(err => {
+        console.log(TAG, 'token exchange failed:', (err as Error).message, JSON.stringify(err));
         setError((err as Error).message ?? 'Failed to connect. Try again.');
         setExchanging(false);
       });
+  };
+
+  useEffect(() => {
+    console.log(TAG, 'response changed:', response?.type, JSON.stringify(response));
+
+    if (response?.type === 'success') {
+      console.log(TAG, 'auth success — code received, starting token exchange');
+      exchangeCode(response.params.code, request?.codeVerifier);
+      return;
+    }
+
+    if (response?.type === 'error') {
+      const msg = response.error?.message ?? 'Authorization failed.';
+      console.log(TAG, 'auth error:', response.error?.code, msg, JSON.stringify(response.error));
+      setError(msg);
+      return;
+    }
+
+    // Android race condition: CCT fires 'dismiss' before Linking delivers the redirect URL.
+    // Check getInitialURL() for a code whose state matches the current request.
+    if (response?.type === 'dismiss' && request) {
+      Linking.getInitialURL().then(url => {
+        if (!url) return;
+        console.log(TAG, '[dismiss workaround] checking initialURL:', url);
+        const qs = url.split('?')[1] ?? '';
+        const params: Record<string, string> = {};
+        for (const pair of qs.split('&')) {
+          const [k, v] = pair.split('=');
+          if (k) params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+        }
+        if (params.state !== request.state || !params.code) {
+          console.log(TAG, '[dismiss workaround] state mismatch or no code — ignoring');
+          return;
+        }
+        console.log(TAG, '[dismiss workaround] state matches — recovering auth code');
+        exchangeCode(params.code, request.codeVerifier);
+      });
+    }
   }, [response]);
 
-  const isConfigured = GOOGLE_CLIENT_ID_ANDROID !== 'REPLACE_WITH_GOOGLE_ANDROID_CLIENT_ID';
+  useEffect(() => {
+    if (request) {
+      console.log(TAG, 'auth request ready — url:', request.url);
+    }
+  }, [request]);
+
+  // Low-level Linking listener — fires if the redirect URI lands on this app at all.
+  // If this logs but response never updates, expo-auth-session is dropping the URL.
+  // If this never logs, the OS isn't routing the redirect to this app (manifest/credential issue).
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      console.log(TAG, '[Linking] incoming url:', url);
+    });
+    Linking.getInitialURL().then(url => {
+      if (url) console.log(TAG, '[Linking] initial url:', url);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const isConfigured = GOOGLE_CLIENT_ID !== '' && !GOOGLE_CLIENT_ID.startsWith('REPLACE');
   const busy         = !request || exchanging;
 
   return (

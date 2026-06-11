@@ -34,3 +34,6 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# Release APKs — uploaded to GitHub Releases, not stored in git
+releases/

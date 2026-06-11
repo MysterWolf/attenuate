@@ -1,4 +1,4 @@
-package com.attenuate
+package com.mysterwolf.attenuate
 
 import android.app.Application
 import android.content.res.Configuration
