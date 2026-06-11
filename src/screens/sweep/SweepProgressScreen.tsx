@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { activateKeepAwake, deactivateKeepAwake } from 'expo-keep-awake';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,6 +41,7 @@ export function SweepProgressScreen() {
     started.current = true;
 
     (async () => {
+      activateKeepAwake();
       try {
         const token = await getValidAccessToken();
         if (!token) { onAuthRevoked(); return; }
@@ -83,6 +85,8 @@ export function SweepProgressScreen() {
         if (err instanceof GmailAuthError) { onAuthRevoked(); return; }
         setError((err as Error).message ?? 'Sweep failed.');
         setPhase('error');
+      } finally {
+        deactivateKeepAwake();
       }
     })();
   }, []);

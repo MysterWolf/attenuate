@@ -216,6 +216,13 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.0.9 — June 2026
+**Wake lock during Cut session prevents screen-sleep interruption**
+
+- `src/screens/sweep/SweepProgressScreen.tsx` — imports `activateKeepAwake` / `deactivateKeepAwake` from `expo-keep-awake` (already in package.json at ~56.0.3); calls `activateKeepAwake()` immediately before the batch async block; calls `deactivateKeepAwake()` in the `finally` clause — guaranteed release on completion, error, or auth revocation; uses `FLAG_KEEP_SCREEN_ON` window flag under the hood (no `WAKE_LOCK` manifest permission required for this approach — that permission is for `WakeLock.PARTIAL_WAKE_LOCK` which keeps CPU alive with screen off, not needed here)
+
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.0.8 — June 2026
 **SweepHome: two distinct sections with clear visual separation**
 
