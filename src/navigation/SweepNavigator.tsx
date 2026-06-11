@@ -7,8 +7,8 @@ import { useTheme } from '../providers/ThemeProvider';
 
 export type SweepStackParamList = {
   SweepHome:     { senderEmail?: string; senderName?: string; senderCount?: number } | undefined;
-  SweepPreview:  { senderEmail: string; senderName: string; senderCount: number };
-  SweepProgress: { senderEmail: string; senderName: string; senderCount: number };
+  SweepPreview:  { senderEmail: string; senderName: string; senderCount: number; gmailQuery?: string };
+  SweepProgress: { senderEmail: string; senderName: string; senderCount: number; gmailQuery?: string };
 };
 
 const Stack = createNativeStackNavigator<SweepStackParamList>();

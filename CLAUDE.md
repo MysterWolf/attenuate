@@ -216,6 +216,18 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.0.7 — June 2026
+**Gmail category sweeps wired to SweepHome**
+
+- `src/services/gmailService.ts` — extracted `fetchAllMessageIds(token, q)` internal helper; refactored `getSenderMessageIds` to call it; added `getMessageIdsByQuery(token, query)` export that fetches all IDs for an arbitrary Gmail query (`${query} -in:trash`)
+- `src/navigation/SweepNavigator.tsx` — added optional `gmailQuery?: string` to both `SweepPreview` and `SweepProgress` param types
+- `src/screens/sweep/SweepHomeScreen.tsx` — replaced static SWEEP_TARGETS list: now shows CATEGORIES section (Promotions/Social/Updates/Forums, each live-wired to `category:X` Gmail query); tapping fetches count + navigates to SweepPreview with `gmailQuery`; per-button spinner while loading; OTHER TARGETS section shows Old Unread + By Keyword as Pro-badged (🔒 PRO, not tappable); removed "By sender" (covered by Stats) and "Newsletters" (no Gmail native category)
+- `src/screens/sweep/SweepPreviewScreen.tsx` — uses `getMessageIdsByQuery(token, gmailQuery)` when `gmailQuery` param is present, else `getSenderMessageIds`; count note updated to "This will cut X emails from {senderName}."; passes `gmailQuery` through to SweepProgress
+- `src/screens/sweep/SweepProgressScreen.tsx` — uses `getMessageIdsByQuery(token, gmailQuery)` when `gmailQuery` param is present, else `getSenderMessageIds`
+
+**Gmail query convention:** `category:X` maps to Gmail's native inbox categories (Promotions, Social, Updates, Forums); `from:email` for sender sweeps; `from:@domain.com` for domain sweeps. All pass through the same Preview → Progress flow unchanged.
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.0.6 — June 2026
 **Stats: domain grouping for top senders**
 

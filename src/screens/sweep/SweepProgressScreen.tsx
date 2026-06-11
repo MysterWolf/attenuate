@@ -11,6 +11,7 @@ import { IMPACT_ENDPOINT } from '../../constants/config';
 import {
   GmailAuthError,
   getSenderMessageIds,
+  getMessageIdsByQuery,
   batchDeleteMessages,
 } from '../../services/gmailService';
 import { useAuth } from '../../providers/AuthProvider';
@@ -26,7 +27,7 @@ export function SweepProgressScreen() {
   const route          = useRoute<Route>();
   const { onAuthRevoked } = useAuth();
 
-  const { senderEmail, senderName, senderCount } = route.params;
+  const { senderEmail, senderName, senderCount, gmailQuery } = route.params;
 
   const [phase,   setPhase]   = useState<Phase>('running');
   const [deleted, setDeleted] = useState(0);
@@ -44,7 +45,9 @@ export function SweepProgressScreen() {
         if (!token) { onAuthRevoked(); return; }
 
         // Re-fetch IDs here so we delete exactly what was previewed
-        const ids = await getSenderMessageIds(token, senderEmail);
+        const ids = gmailQuery
+          ? await getMessageIdsByQuery(token, gmailQuery)
+          : await getSenderMessageIds(token, senderEmail);
         setTotal(ids.length);
 
         if (ids.length === 0) {

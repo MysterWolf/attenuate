@@ -17,6 +17,7 @@ import { getValidAccessToken } from '../../services/authService';
 import {
   GmailAuthError,
   getSenderMessageIds,
+  getMessageIdsByQuery,
   getSampleSubjects,
 } from '../../services/gmailService';
 import { useAuth } from '../../providers/AuthProvider';
@@ -30,7 +31,7 @@ export function SweepPreviewScreen() {
   const route          = useRoute<Route>();
   const { onAuthRevoked } = useAuth();
 
-  const { senderEmail, senderName, senderCount } = route.params;
+  const { senderEmail, senderName, senderCount, gmailQuery } = route.params;
 
   const [msgIds,   setMsgIds]   = useState<string[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -45,7 +46,9 @@ export function SweepPreviewScreen() {
         const token = await getValidAccessToken();
         if (!token) { onAuthRevoked(); return; }
 
-        const ids = await getSenderMessageIds(token, senderEmail);
+        const ids = gmailQuery
+          ? await getMessageIdsByQuery(token, gmailQuery)
+          : await getSenderMessageIds(token, senderEmail);
         if (cancelled) return;
         setMsgIds(ids);
 
@@ -62,7 +65,7 @@ export function SweepPreviewScreen() {
     })();
 
     return () => { cancelled = true; };
-  }, [senderEmail]);
+  }, [senderEmail, gmailQuery]);
 
   const realCount = msgIds.length;
 
@@ -86,7 +89,7 @@ export function SweepPreviewScreen() {
           )}
           {!loading && (
             <Text style={[s.countNote, { color: C.muted }]}>
-              All mail from {senderEmail}
+              This will cut {realCount} emails from {senderName}.
             </Text>
           )}
         </View>
@@ -121,7 +124,7 @@ export function SweepPreviewScreen() {
         <TouchableOpacity
           style={[s.btnPrimary, { backgroundColor: C.danger }, (loading || realCount === 0) && s.btnDisabled]}
           disabled={loading || realCount === 0}
-          onPress={() => nav.navigate('SweepProgress', { senderEmail, senderName, senderCount: realCount })}
+          onPress={() => nav.navigate('SweepProgress', { senderEmail, senderName, senderCount: realCount, gmailQuery })}
         >
           <Text style={[s.btnPrimaryText, { color: '#fff' }]}>Attenuate</Text>
         </TouchableOpacity>

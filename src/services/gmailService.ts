@@ -182,26 +182,19 @@ export async function getTopSenders(
 
 // Fetch all message IDs from a given sender. Used for preview count + delete.
 // Excludes messages already in Trash so repeated sweeps don't double-count.
-export async function getSenderMessageIds(
-  token:       string,
-  senderEmail: string,
-): Promise<string[]> {
-  console.log('[gmail] calling getSenderMessageIds', senderEmail);
+async function fetchAllMessageIds(token: string, q: string): Promise<string[]> {
   const ids: string[] = [];
   let pageToken: string | undefined;
   let page = 0;
 
   while (true) {
-    const params: Record<string, string> = {
-      maxResults: '500',
-      q: `from:${senderEmail} -in:trash`,
-    };
+    const params: Record<string, string> = { maxResults: '500', q };
     if (pageToken) params.pageToken = pageToken;
 
     const result = await gFetch<{
       messages?: Array<{ id: string }>;
       nextPageToken?: string;
-    }>(token, '/messages', params, 0, `getSenderMessageIds/page[${page}]`);
+    }>(token, '/messages', params, 0, `fetchAllMessageIds/page[${page}]`);
     page++;
 
     const batch = result.messages ?? [];
@@ -211,7 +204,26 @@ export async function getSenderMessageIds(
     pageToken = result.nextPageToken;
   }
 
+  return ids;
+}
+
+export async function getSenderMessageIds(
+  token:       string,
+  senderEmail: string,
+): Promise<string[]> {
+  console.log('[gmail] getSenderMessageIds', senderEmail);
+  const ids = await fetchAllMessageIds(token, `from:${senderEmail} -in:trash`);
   console.log('[gmail] getSenderMessageIds done, ids:', ids.length);
+  return ids;
+}
+
+export async function getMessageIdsByQuery(
+  token: string,
+  query: string,
+): Promise<string[]> {
+  console.log('[gmail] getMessageIdsByQuery', query);
+  const ids = await fetchAllMessageIds(token, `${query} -in:trash`);
+  console.log('[gmail] getMessageIdsByQuery done, ids:', ids.length);
   return ids;
 }
 

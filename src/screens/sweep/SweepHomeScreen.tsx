@@ -1,22 +1,74 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useTheme } from '../../providers/ThemeProvider';
+import { useAuth } from '../../providers/AuthProvider';
+import { getValidAccessToken } from '../../services/authService';
+import { GmailAuthError, getMessageIdsByQuery } from '../../services/gmailService';
 import type { SweepStackParamList } from '../../navigation/SweepNavigator';
 
 type Nav   = NativeStackNavigationProp<SweepStackParamList, 'SweepHome'>;
 type Route = RouteProp<SweepStackParamList, 'SweepHome'>;
 
+interface Category {
+  id:    string;
+  label: string;
+  query: string;
+  desc:  string;
+}
+
+const CATEGORIES: Category[] = [
+  { id: 'promotions', label: 'Promotions', query: 'category:promotions', desc: 'Shopping, deals, offers' },
+  { id: 'social',     label: 'Social',     query: 'category:social',     desc: 'Notifications, friend activity' },
+  { id: 'updates',    label: 'Updates',    query: 'category:updates',    desc: 'Receipts, confirmations, bills' },
+  { id: 'forums',     label: 'Forums',     query: 'category:forums',     desc: 'Mailing lists, group discussions' },
+];
+
+const PRO_TARGETS = [
+  { id: 'unread_old', label: 'Old Unread',  desc: 'Unread messages older than 30 days' },
+  { id: 'by_keyword', label: 'By Keyword',  desc: 'Delete all messages matching a search query' },
+];
+
 export function SweepHomeScreen() {
-  const { C } = useTheme();
-  const nav   = useNavigation<Nav>();
-  const route = useRoute<Route>();
+  const { C }          = useTheme();
+  const nav            = useNavigation<Nav>();
+  const route          = useRoute<Route>();
+  const { onAuthRevoked } = useAuth();
 
   const { senderEmail, senderName, senderCount } = route.params ?? {};
   const hasSender = !!senderEmail;
+
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const handleCategoryPress = async (cat: Category) => {
+    if (loadingId) return;
+    setLoadingId(cat.id);
+    try {
+      const token = await getValidAccessToken();
+      if (!token) { onAuthRevoked(); return; }
+      const ids = await getMessageIdsByQuery(token, cat.query);
+      nav.navigate('SweepPreview', {
+        senderEmail: cat.query,
+        senderName:  cat.label,
+        senderCount: ids.length,
+        gmailQuery:  cat.query,
+      });
+    } catch (err) {
+      if (err instanceof GmailAuthError) { onAuthRevoked(); return; }
+    } finally {
+      setLoadingId(null);
+    }
+  };
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: C.background }]}>
@@ -59,34 +111,64 @@ export function SweepHomeScreen() {
           </View>
         )}
 
-        {/* Standard target list */}
-        <View style={s.targetList}>
-          {!hasSender && <Text style={[s.sectionLabel, { color: C.muted }]}>TARGET TYPES</Text>}
-          {SWEEP_TARGETS.map(target => (
-            <TouchableOpacity
+        {/* Gmail native categories */}
+        <View style={s.section}>
+          <Text style={[s.sectionLabel, { color: C.muted }]}>CATEGORIES</Text>
+          {CATEGORIES.map(cat => {
+            const isLoading = loadingId === cat.id;
+            const isDisabled = loadingId !== null && !isLoading;
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[
+                  s.targetCard,
+                  { backgroundColor: C.surface, borderColor: isLoading ? C.accent : C.border },
+                  isDisabled && s.cardDisabled,
+                ]}
+                onPress={() => handleCategoryPress(cat)}
+                activeOpacity={0.6}
+                disabled={isDisabled}
+              >
+                <View style={s.targetCardRow}>
+                  <View style={s.targetCardInfo}>
+                    <Text style={[s.targetTitle, { color: C.ink }]}>{cat.label}</Text>
+                    <Text style={[s.targetDesc, { color: C.muted }]}>{cat.desc}</Text>
+                  </View>
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color={C.accent} />
+                  ) : (
+                    <Text style={[s.chevron, { color: C.muted }]}>›</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Pro-gated targets */}
+        <View style={s.section}>
+          <Text style={[s.sectionLabel, { color: C.muted }]}>MORE TARGETS</Text>
+          {PRO_TARGETS.map(target => (
+            <View
               key={target.id}
-              style={[s.targetCard, { backgroundColor: C.surface, borderColor: C.border }]}
-              onPress={() => {
-                // TODO: wire up non-sender targets in a future session
-              }}
+              style={[s.targetCard, s.targetCardPro, { backgroundColor: C.surface, borderColor: C.border }]}
             >
-              <Text style={[s.targetTitle, { color: C.ink }]}>{target.label}</Text>
-              <Text style={[s.targetDesc, { color: C.muted }]}>{target.description}</Text>
-            </TouchableOpacity>
+              <View style={s.targetCardRow}>
+                <View style={s.targetCardInfo}>
+                  <Text style={[s.targetTitle, { color: C.muted }]}>{target.label}</Text>
+                  <Text style={[s.targetDesc, { color: C.muted }]}>{target.desc}</Text>
+                </View>
+                <View style={[s.proBadge, { backgroundColor: C.surfaceAlt, borderColor: C.border }]}>
+                  <Text style={[s.proBadgeText, { color: C.warning }]}>🔒 PRO</Text>
+                </View>
+              </View>
+            </View>
           ))}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const SWEEP_TARGETS = [
-  { id: 'unread_old',   label: 'Old unread',      description: 'Unread messages older than 30 days' },
-  { id: 'newsletters',  label: 'Newsletters',      description: 'Detected newsletter / mailing list senders' },
-  { id: 'promotions',   label: 'Promotions',       description: 'Google Promotions tab — all of it' },
-  { id: 'by_sender',    label: 'By sender',        description: 'Choose a sender and delete all their mail' },
-  { id: 'by_keyword',   label: 'By keyword',       description: 'Delete all messages matching a search query' },
-];
 
 const s = StyleSheet.create({
   root: {
@@ -112,6 +194,10 @@ const s = StyleSheet.create({
   selectedSection: {
     marginBottom: 28,
     gap: 10,
+  },
+  section: {
+    marginBottom: 28,
+    gap: 8,
   },
   sectionLabel: {
     fontSize: 11,
@@ -165,21 +251,46 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  targetList: {
-    gap: 10,
-  },
   targetCard: {
     borderRadius: 12,
     borderWidth: 1,
     padding: 16,
   },
+  targetCardPro: {
+    opacity: 0.6,
+  },
+  cardDisabled: {
+    opacity: 0.5,
+  },
+  targetCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  targetCardInfo: {
+    flex: 1,
+    gap: 3,
+  },
   targetTitle: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
   },
   targetDesc: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  chevron: {
+    fontSize: 22,
+  },
+  proBadge: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  proBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });
