@@ -32,10 +32,11 @@ export function SweepPreviewScreen() {
 
   const { senderEmail, senderName, senderCount, gmailQuery } = route.params;
 
-  const [realCount, setRealCount] = useState(senderCount);
-  const [subjects,  setSubjects]  = useState<string[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState<string | null>(null);
+  const [realCount,   setRealCount]   = useState(senderCount);
+  const [countCapped, setCountCapped] = useState(false);
+  const [subjects,    setSubjects]    = useState<string[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +50,10 @@ export function SweepPreviewScreen() {
           ? `${gmailQuery} -in:trash`
           : `from:${senderEmail} -in:trash`;
 
-        const { estimatedCount, sampleIds } = await getPreviewData(token, q);
+        const { estimatedCount, sampleIds, capped } = await getPreviewData(token, q);
         if (cancelled) return;
         setRealCount(estimatedCount);
+        setCountCapped(capped);
 
         const subs = await getSampleSubjects(token, sampleIds, 5);
         if (cancelled) return;
@@ -84,11 +86,11 @@ export function SweepPreviewScreen() {
           {loading ? (
             <ActivityIndicator size="large" color={C.accent} style={s.spinner} />
           ) : (
-            <Text style={[s.countValue, { color: C.ink }]}>{realCount}</Text>
+            <Text style={[s.countValue, { color: C.ink }]}>{countCapped ? '500+' : realCount}</Text>
           )}
           {!loading && (
             <Text style={[s.countNote, { color: C.muted }]}>
-              This will cut {realCount} emails from {senderName}.
+              This will cut {countCapped ? '500+' : realCount} emails from {senderName}.
             </Text>
           )}
         </View>
@@ -121,8 +123,8 @@ export function SweepPreviewScreen() {
           <Text style={[s.btnSecondaryText, { color: C.inkMid }]}>Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[s.btnPrimary, { backgroundColor: C.danger }, (loading || realCount === 0) && s.btnDisabled]}
-          disabled={loading || realCount === 0}
+          style={[s.btnPrimary, { backgroundColor: C.danger }, (loading || (!countCapped && realCount === 0)) && s.btnDisabled]}
+          disabled={loading || (!countCapped && realCount === 0)}
           onPress={() => nav.navigate('SweepProgress', { senderEmail, senderName, senderCount: realCount, gmailQuery })}
         >
           <Text style={[s.btnPrimaryText, { color: '#fff' }]}>Attenuate</Text>

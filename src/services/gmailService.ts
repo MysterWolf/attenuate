@@ -190,7 +190,7 @@ export async function getTopSenders(
 export async function getPreviewData(
   token: string,
   q:     string,
-): Promise<{ estimatedCount: number; sampleIds: string[] }> {
+): Promise<{ estimatedCount: number; sampleIds: string[]; capped: boolean }> {
   const result = await gFetch<{
     messages?:           Array<{ id: string }>;
     resultSizeEstimate?: number;
@@ -200,8 +200,10 @@ export async function getPreviewData(
   const allIds         = (result.messages ?? []).map(m => m.id);
   const sampleIds      = allIds.slice(0, 5);
   const estimatedCount = result.resultSizeEstimate ?? allIds.length;
-  console.log('[gmail] getPreviewData estimate:', estimatedCount, 'total on page:', allIds.length);
-  return { estimatedCount, sampleIds };
+  // Full page returned means there are likely more — Gmail can't give an exact count
+  const capped         = allIds.length >= 500;
+  console.log('[gmail] getPreviewData estimate:', estimatedCount, 'total on page:', allIds.length, 'capped:', capped);
+  return { estimatedCount, sampleIds, capped };
 }
 
 // Streaming delete: fetches 500 IDs per page and immediately trashes them,

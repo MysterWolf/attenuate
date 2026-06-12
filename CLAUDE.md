@@ -216,6 +216,14 @@ Relevant skills for this repo:
 
 ## Changelog
 
+### v1.1.2 — June 2026
+**Fix: Preview shows "500+" instead of misleading "501" for large target counts**
+
+- `src/services/gmailService.ts` — `getPreviewData` return type gains `capped: boolean`; `capped = allIds.length >= 500` (a full page means there are likely more messages than Gmail can precisely estimate)
+- `src/screens/sweep/SweepPreviewScreen.tsx` — added `countCapped` state; on `getPreviewData` response, calls `setCountCapped(capped)`; count display and count note both render `'500+'` when `countCapped` is true; Attenuate button disabled condition updated: `loading || (!countCapped && realCount === 0)` — capped counts always enable the button
+
+**Invariants still holding:** dark default, #00C2A8 accent, popToTop() for sweep return, 401 → onAuthRevoked(), Claude API gated.
+
 ### v1.1.1 — June 2026
 **Fix: Preview always showed 201 for domain cuts**
 
