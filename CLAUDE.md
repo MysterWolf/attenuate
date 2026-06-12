@@ -2,7 +2,7 @@
 
 # Attenuate — Claude Context
 **Last updated:** June 2026
-**Version:** 1.0.0 (versionCode 1)
+**Version:** 1.1.2
 
 ## What This Is
 An Android email management app. Delete email at scale — your inbox is noise. Connects to Gmail via OAuth, lets users select targets (old unread, newsletters, promotions, by sender, by keyword), previews the blast radius, then executes bulk delete / archive operations. AI tier uses Claude API to suggest smart sweep targets.
@@ -51,7 +51,7 @@ src/
     AuthProvider.tsx      — auth state (checking/authenticated/unauthenticated)
   services/
     authService.ts        — token storage, getValidAccessToken, auto-refresh
-    gmailService.ts       — Gmail REST API: getProfile, getInboxLabel, getTopSenders
+    gmailService.ts       — Gmail REST API: getProfile, getInboxLabel, getTopSenders, getPreviewData, streamDeleteByQuery, getSampleSubjects
     claudeService.ts      — Claude API (wired, disabled until key set)
     purchaseService.ts    — RevenueCat IAP scaffold
     notificationService.ts — placeholder, not wired
@@ -106,8 +106,13 @@ Mirrors the batch/paginate approach from the reference Apps Scripts:
 | `getProfile(token)` | `GET /users/me/profile` | email + total messages across all mail |
 | `getInboxLabel(token)` | `GET /users/me/labels/INBOX` | exact inbox total + unread count |
 | `getTopSenders(token, limit, userEmail)` | `GET /users/me/messages` + `GET /messages/{id}?format=metadata` | paginates up to SENDER_SAMPLE=200, fetches From headers in chunks of 25, aggregates by sender |
+| `getPreviewData(token, q)` | `GET /users/me/messages` | single call, `maxResults:500`; returns `{ estimatedCount, sampleIds, capped }` — `estimatedCount` from `resultSizeEstimate`, `sampleIds` = first 5 IDs for subject preview, `capped = true` when full page returned (display "500+") |
+| `streamDeleteByQuery(token, q, onProgress, onPageError)` | `GET /users/me/messages` + `POST batchModify` | streaming pipeline: fetch 500 IDs via `nextPageToken` → trash immediately → repeat; O(500) memory; per-page errors non-fatal; returns `totalDeleted` |
+| `getSampleSubjects(token, ids, limit)` | `GET /messages/{id}?format=metadata` | parallel Subject header fetch for preview card |
 
-The `q` parameter on `messages.list` uses identical syntax to the Apps Script `GmailApp.search()` — `is:unread`, `older_than:Nd`, `from:addr`, `"keyword"` — same query strings will be reused for sweep execution.
+**Removed (replaced by streaming pipeline):** `fetchAllMessageIds`, `getSenderMessageIds`, `getMessageIdsByQuery`, `batchDeleteMessages`
+
+The `q` parameter on `messages.list` uses identical syntax to the Apps Script `GmailApp.search()` — `is:unread`, `older_than:Nd`, `from:addr`, `from:@domain.com`, `category:promotions`, `"keyword"` — all route through the same Preview → Progress flow via the `gmailQuery` param.
 
 `GmailAuthError` is thrown on 401. StatsScreen catches it and calls `useAuth().onAuthRevoked()` which resets the auth gate to ConnectScreen.
 
@@ -167,16 +172,12 @@ Mipmap sizes: mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192 (`.webp` exten
 | `attenuate_share_impact` | `'true' \| 'false'` (community telemetry opt-in) |
 
 ## Pending Work (Priority Order)
-1. **Google OAuth credentials** — set `GOOGLE_CLIENT_ID_ANDROID` in config.ts; run `npx expo run:android` to generate native project
-2. **Sweep execution** — wire Gmail API batch delete/archive using same `q` syntax as reference scripts
-3. **Sweep preview counts** — `messages.list` with `resultSizeEstimate` (mirrors `_countThreads` from reference script)
-4. **Sweep history persistence** — write/read from AsyncStorage sweep log after each sweep
-5. **RevenueCat** — add real API key, wire `initPurchases()` in App.tsx, gate Pro/AI features
-6. **Settings → disconnect Gmail** — call `clearTokens()` + `onAuthRevoked()` from SettingsScreen
-7. **Claude API** — AI sweep suggestions for AI tier (entitlement gate already in place)
-8. **Local notifications** — wire `notificationService.ts` for scheduled sweep reminders
-9. **App icon** — design and replace placeholder
-10. **Play Store listing** — description, screenshots, privacy policy URL
+1. **RevenueCat** — add real API key, wire `initPurchases()` in App.tsx, gate Pro/AI features
+2. **Settings → disconnect Gmail** — call `clearTokens()` + `onAuthRevoked()` from SettingsScreen
+3. **Claude API** — AI sweep suggestions for AI tier (entitlement gate already in place)
+4. **Local notifications** — wire `notificationService.ts` for scheduled sweep reminders
+5. **App icon** — design and replace placeholder
+6. **Play Store listing** — description, screenshots, privacy policy URL
 
 ## Build
 ```bash
