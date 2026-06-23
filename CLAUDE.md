@@ -1,7 +1,7 @@
 @AGENTS.md
 
 # Attenuate — Claude Context
-**Last updated:** June 2026
+**Last updated:** June 22, 2026
 **Version:** 1.1.2
 
 ## What This Is
@@ -18,7 +18,7 @@ An Android email management app. Delete email at scale — your inbox is noise. 
 | Storage | AsyncStorage | No SQLite — sweep log + prefs only |
 | Gmail | OAuth2 (expo-auth-session) + Gmail REST API | Wired and live |
 | AI | Claude Sonnet 4.6 API | Wired, disabled until key configured |
-| IAP | RevenueCat | 3 tiers (see below) |
+| IAP | RevenueCat | 3 tiers (see below) — scaffold only, not imported in bundle |
 | Notifications | Placeholder service | Not wired yet |
 | Theme | Dark default | Accent #00C2A8 signal teal |
 
@@ -50,7 +50,7 @@ src/
     ThemeProvider.tsx     — dark/light/auto, persisted via AsyncStorage
     AuthProvider.tsx      — auth state (checking/authenticated/unauthenticated)
   services/
-    authService.ts        — token storage, getValidAccessToken, auto-refresh
+    authService.ts        — token storage, getValidAccessToken, auto-refresh, storeUserEmail, streak + milestone helpers
     gmailService.ts       — Gmail REST API: getProfile, getInboxLabel, getTopSenders, getPreviewData, streamDeleteByQuery, getSampleSubjects
     claudeService.ts      — Claude API (wired, disabled until key set)
     purchaseService.ts    — RevenueCat IAP scaffold
@@ -156,7 +156,7 @@ Mipmap sizes: mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192 (`.webp` exten
 - **Accent is #00C2A8 (signal teal).** Do not substitute.
 - **ThemeProvider uses AsyncStorage, NOT RNFS.** This app has no native file system dependency.
 - **Claude API is wired but DISABLED until a key is stored.** `claudeService.sendMessage()` checks for a key first — never skip this gate.
-- **RevenueCat is scaffolded but NOT initialized until `initPurchases()` is called.** Wire in App.tsx when RC dashboard is configured with correct API key.
+- **RevenueCat is not imported in the bundle at all.** `purchaseService.ts` is a scaffold file but `react-native-purchases` is not wired anywhere. Do not assume IAP is partially functional.
 - **Sweep stack uses `popToTop()` to return home after a sweep** — not `goBack()`.
 - **401 from gmailService must call `onAuthRevoked()`** — never silently fail or retry. Token is gone; re-auth is required.
 - **`getTopSenders` filters out the signed-in user's own email** — pass `profile.email` as the third argument always.
@@ -167,17 +167,22 @@ Mipmap sizes: mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192 (`.webp` exten
 |-----|-------|
 | `attenuate_theme_mode` | `'dark' \| 'light' \| 'auto'` |
 | `attenuate_oauth_tokens` | `StoredTokens` JSON (accessToken, refreshToken, expiresAt) |
+| `attenuate_user_email` | signed-in Gmail address (stored after OAuth, used for sender self-filter) |
 | `attenuate_claude_api_key` | Claude API key string |
 | `attenuate_sweep_log` | JSON array of past sweep records |
 | `attenuate_share_impact` | `'true' \| 'false'` (community telemetry opt-in) |
+| `attenuate_streak` | `{ lastCutDate: YYYY-MM-DD, count }` JSON |
+| `attenuate_milestones` | JSON array of milestone values already shown |
 
 ## Pending Work (Priority Order)
-1. **RevenueCat** — add real API key, wire `initPurchases()` in App.tsx, gate Pro/AI features
-2. **Settings → disconnect Gmail** — call `clearTokens()` + `onAuthRevoked()` from SettingsScreen
-3. **Claude API** — AI sweep suggestions for AI tier (entitlement gate already in place)
-4. **Local notifications** — wire `notificationService.ts` for scheduled sweep reminders
+1. **RevenueCat** — import `react-native-purchases`, add real API key, wire `initPurchases()` in App.tsx, gate Pro/AI features behind entitlement checks
+2. **Claude API** — AI sweep suggestions for AI tier (`claudeService.sendMessage()` is defined but never called; entitlement gate already in place)
+3. **Local notifications** — wire `notificationService.ts` for scheduled sweep reminders
+4. **Version strings** — `APP_VERSION` in `config.ts`, `versionName` and `versionCode` in `android/app/build.gradle` are all stuck at `1.0.0` / `1.0` / `1`; increment with each release
 5. **App icon** — design and replace placeholder
 6. **Play Store listing** — description, screenshots, privacy policy URL
+
+> **Already done (removed from list):** Settings → disconnect Gmail — `clearTokens()` + `onAuthRevoked()` are both called from the disconnect button in SettingsScreen (confirmed in v1.1.2 APK).
 
 ## Build
 ```bash
